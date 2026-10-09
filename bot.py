@@ -35,7 +35,13 @@ _scalp_terakhir: dict = {}  # symbol -> (waktu, arah, entry)
 # ---------- helper ----------
 def is_owner(update: Update) -> bool:
     """Yang boleh pakai: user owner, baik di chat pribadi maupun di grup."""
-    return bool(update.effective_user and update.effective_user.id in config.OWNER_CHAT_IDS)
+    uid = update.effective_user.id if update.effective_user else None
+    ok = uid in config.OWNER_CHAT_IDS
+    m = update.effective_message
+    logger.info("Perintah %r dari user %s di chat %s (topik %s) -> %s",
+                m.text if m else None, uid, update.effective_chat.id if update.effective_chat else None,
+                m.message_thread_id if m else None, "diproses" if ok else "DITOLAK (bukan owner)")
+    return ok
 
 
 def thread_of(update: Update):
@@ -260,6 +266,10 @@ async def cmd_idtopik(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def on_error(update, context: ContextTypes.DEFAULT_TYPE):
+    logger.error("Error saat proses update: %s", context.error, exc_info=context.error)
+
+
 def main():
     if not config.TELEGRAM_BOT_TOKEN:
         raise SystemExit("TELEGRAM_BOT_TOKEN belum diisi")
@@ -270,6 +280,7 @@ def main():
     app.add_handler(CommandHandler("scalp", cmd_scalp))
     app.add_handler(CommandHandler("harga", cmd_harga))
     app.add_handler(CommandHandler("idtopik", cmd_idtopik))
+    app.add_error_handler(on_error)
 
     jq = app.job_queue
     h, m = config.JAM_LAPORAN_PAGI
@@ -284,7 +295,7 @@ def main():
     if not config.OWNER_CHAT_IDS:
         logger.warning("OWNER_CHAT_IDS kosong: kirim /start ke bot untuk lihat chat ID.")
     logger.info("Asisten Market jalan. Pair: %s", ", ".join(config.SYMBOLS))
-    app.run_polling(drop_pending_updates=True)
+    app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
 if __name__ == "__main__":
