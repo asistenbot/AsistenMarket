@@ -66,11 +66,18 @@ def pilih_symbol(args) -> list:
 
 
 # ---------- pekerjaan inti ----------
-async def buat_laporan_pagi(symbols=None) -> str:
-    data = {}
+async def buat_laporan_pagi(symbols=None) -> list:
+    """Satu pesan per pair, biar rapi dan nggak kepanjangan."""
+    pesan = [f"☀️ LAPORAN PAGI — {manager.sekarang()}\n"
+             "Gambaran besar (3M, 1M, 1W, 1D) + intraday (4H, 1H, 15m) per pair.\n"
+             "⚠️ Analisa teknikal otomatis, bukan saran keuangan."]
     for sym in symbols or config.SYMBOLS:
-        data[sym] = await analisa(sym, TF_SWING + TF_INTRADAY)
-    return await manager.laporan_pagi(data)
+        data = {sym: await analisa(sym, TF_SWING + TF_INTRADAY)}
+        if all("error" in v for v in data[sym].values()):
+            pesan.append(f"{config.SYMBOLS[sym]['label']}: data belum bisa diambil.")
+            continue
+        pesan.append(await manager.laporan_pagi(data))
+    return pesan
 
 
 async def buat_update_intraday(symbols=None) -> str | None:
@@ -112,7 +119,8 @@ async def scan_scalping(symbols=None, paksa=False) -> list:
 # ---------- jadwal ----------
 async def job_laporan_pagi(context: ContextTypes.DEFAULT_TYPE):
     try:
-        await kirim_ke_owner(context.bot, await buat_laporan_pagi())
+        for p in await buat_laporan_pagi():
+            await kirim_ke_owner(context.bot, p)
     except Exception as e:
         logger.exception("Laporan pagi gagal: %s", e)
 
@@ -148,7 +156,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Asisten Market siap 📊\n\n"
         "/laporan — laporan lengkap semua timeframe\n"
-        "/laporan xau — laporan satu pair\n"
+        "/laporan xau — laporan satu pair (bisa: btc, eth, sol, sui, tao, hype, ondo, aster)\n"
         "/intraday — update 4H, 1H, 15m\n"
         "/scalp — cek ide scalping sekarang\n"
         "/harga — harga terakhir\n\n"
@@ -175,9 +183,9 @@ async def _proses(update: Update, context, fungsi, *a):
 
 
 async def cmd_laporan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    teks = await _proses(update, context, buat_laporan_pagi, pilih_symbol(context.args))
-    if teks:
-        await kirim(context.bot, update.effective_chat.id, teks)
+    hasil = await _proses(update, context, buat_laporan_pagi, pilih_symbol(context.args))
+    for p in hasil or []:
+        await kirim(context.bot, update.effective_chat.id, p)
 
 
 async def cmd_intraday(update: Update, context: ContextTypes.DEFAULT_TYPE):

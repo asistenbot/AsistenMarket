@@ -23,6 +23,12 @@ SYMBOLS = {
     "XAUUSD": {"label": "XAU/USD (Emas)", "source": "twelvedata", "ticker": "XAU/USD", "digits": 2},
     "BTCUSDT": {"label": "BTC/USDT", "source": "binance", "ticker": "BTCUSDT", "digits": 1},
     "ETHUSDT": {"label": "ETH/USDT", "source": "binance", "ticker": "ETHUSDT", "digits": 2},
+    "SOLUSDT": {"label": "SOL/USDT", "source": "binance", "ticker": "SOLUSDT", "digits": 2},
+    "SUIUSDT": {"label": "SUI/USDT", "source": "binance", "ticker": "SUIUSDT", "digits": 4},
+    "TAOUSDT": {"label": "TAO/USDT", "source": "binance", "ticker": "TAOUSDT", "digits": 2},
+    "HYPEUSDT": {"label": "HYPE/USDT (Hyperliquid)", "source": "binance", "ticker": "HYPEUSDT", "digits": 3},
+    "ONDOUSDT": {"label": "ONDO/USDT", "source": "binance", "ticker": "ONDOUSDT", "digits": 4},
+    "ASTERUSDT": {"label": "ASTER/USDT", "source": "binance", "ticker": "ASTERUSDT", "digits": 4},
 }
 
 # Jadwal (jam WIB)

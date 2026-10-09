@@ -1,6 +1,6 @@
 # Asisten Market
 
-Bot Telegram analisa XAU/USD, BTC, dan ETH.
+Bot Telegram analisa XAU/USD dan crypto (BTC, ETH, SOL, SUI, TAO, HYPE, ONDO, ASTER).
 
 | Peran | File | Tugas |
 |---|---|---|

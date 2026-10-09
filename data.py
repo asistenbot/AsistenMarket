@@ -33,23 +33,85 @@ def _candle(t, o, h, l, c, v=0.0):
     return {"t": t, "o": float(o), "h": float(h), "l": float(l), "c": float(c), "v": float(v or 0)}
 
 
+OKX_TF = {"5m": "5m", "15m": "15m", "1h": "1H", "4h": "4H", "1d": "1Dutc", "1w": "1Wutc", "1M": "1Mutc"}
+BYBIT_TF = {"5m": "5", "15m": "15", "1h": "60", "4h": "240", "1d": "D", "1w": "W", "1M": "M"}
+
+# Sumber yang terakhir berhasil per ticker, biar nggak coba dari awal terus
+_sumber_ok: dict = {}
+
+
+def _ms(x) -> datetime:
+    return datetime.fromtimestamp(int(x) / 1000, tz=timezone.utc)
+
+
+async def _src_binance_spot(client, ticker, tf, limit):
+    last = None
+    for host in BINANCE_HOSTS:
+        try:
+            r = await client.get(f"{host}/api/v3/klines",
+                                 params={"symbol": ticker, "interval": BINANCE_TF[tf], "limit": min(limit, 1000)})
+            r.raise_for_status()
+            return [_candle(_ms(k[0]), k[1], k[2], k[3], k[4], k[5]) for k in r.json()]
+        except Exception as e:
+            last = e
+    raise DataError(f"binance spot: {last}")
+
+
+async def _src_binance_futures(client, ticker, tf, limit):
+    r = await client.get("https://fapi.binance.com/fapi/v1/klines",
+                         params={"symbol": ticker, "interval": BINANCE_TF[tf], "limit": min(limit, 1500)})
+    r.raise_for_status()
+    return [_candle(_ms(k[0]), k[1], k[2], k[3], k[4], k[5]) for k in r.json()]
+
+
+async def _src_okx(client, ticker, tf, limit):
+    inst = ticker.replace("USDT", "-USDT")
+    r = await client.get("https://www.okx.com/api/v5/market/candles",
+                         params={"instId": inst, "bar": OKX_TF[tf], "limit": min(limit, 300)})
+    r.raise_for_status()
+    d = r.json()
+    if d.get("code") != "0" or not d.get("data"):
+        raise DataError(f"okx: {d.get('msg') or 'kosong'}")
+    return [_candle(_ms(k[0]), k[1], k[2], k[3], k[4], k[5]) for k in reversed(d["data"])]
+
+
+async def _src_bybit(client, ticker, tf, limit):
+    r = await client.get("https://api.bybit.com/v5/market/kline",
+                         params={"category": "spot", "symbol": ticker, "interval": BYBIT_TF[tf],
+                                 "limit": min(limit, 1000)})
+    r.raise_for_status()
+    d = r.json()
+    rows = (d.get("result") or {}).get("list") or []
+    if d.get("retCode") != 0 or not rows:
+        raise DataError(f"bybit: {d.get('retMsg') or 'kosong'}")
+    return [_candle(_ms(k[0]), k[1], k[2], k[3], k[4], k[5]) for k in reversed(rows)]
+
+
+_SUMBER_CRYPTO = [
+    ("binance", _src_binance_spot),
+    ("binance-futures", _src_binance_futures),
+    ("okx", _src_okx),
+    ("bybit", _src_bybit),
+]
+
+
 async def _fetch_binance(ticker: str, tf: str, limit: int) -> list:
-    params = {"symbol": ticker, "interval": BINANCE_TF[tf], "limit": limit}
-    last_err = None
+    """Ambil candle crypto. Coba Binance dulu, kalau koin nggak ada/gagal pindah ke sumber cadangan."""
+    urutan = sorted(_SUMBER_CRYPTO, key=lambda s: s[0] != _sumber_ok.get(ticker))
+    errors = []
     async with httpx.AsyncClient(timeout=20) as client:
-        for host in BINANCE_HOSTS:
+        for nama, fn in urutan:
             try:
-                r = await client.get(f"{host}/api/v3/klines", params=params)
-                r.raise_for_status()
-                rows = r.json()
-                return [
-                    _candle(datetime.fromtimestamp(k[0] / 1000, tz=timezone.utc), k[1], k[2], k[3], k[4], k[5])
-                    for k in rows
-                ]
-            except Exception as e:  # coba host cadangan
-                last_err = e
-                logger.warning("Binance %s gagal di %s: %s", ticker, host, e)
-    raise DataError(f"Gagal ambil data {ticker} {tf} dari Binance: {last_err}")
+                candles = await fn(client, ticker, tf, limit)
+                if len(candles) >= 5:
+                    if _sumber_ok.get(ticker) != nama:
+                        logger.info("Data %s diambil dari %s", ticker, nama)
+                    _sumber_ok[ticker] = nama
+                    return candles
+                errors.append(f"{nama}: data sedikit")
+            except Exception as e:
+                errors.append(f"{nama}: {str(e)[:80]}")
+    raise DataError(f"Gagal ambil {ticker} {tf} ({'; '.join(errors)})")
 
 
 async def _fetch_twelvedata(ticker: str, tf: str, limit: int) -> list:
@@ -110,7 +172,7 @@ async def get_candles(symbol: str, tf: str, limit: int = 250) -> list:
         return hit[1]
 
     if info["source"] == "binance":
-        candles = await _fetch_binance(info["ticker"], tf, min(limit, 1000))
+        candles = await _fetch_binance(info["ticker"], tf, limit)
     else:
         candles = await _fetch_twelvedata(info["ticker"], tf, min(limit, 5000))
 

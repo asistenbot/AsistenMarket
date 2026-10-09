@@ -66,18 +66,18 @@ def _cadangan(judul: str, data: dict) -> str:
 
 
 async def laporan_pagi(data: dict) -> str:
-    """data = {symbol: {tf: ringkasan}} berisi semua timeframe 3M..15m."""
+    """data = {symbol: {tf: ringkasan}} untuk SATU pair, berisi semua timeframe 3M..15m."""
     prompt = (
-        f"Waktu: {sekarang()}. Bikin LAPORAN PAGI untuk tiap pair di bawah. Untuk tiap pair tulis:\n"
+        f"Waktu: {sekarang()}. Bikin LAPORAN PAGI untuk pair di bawah. Awali dengan nama pair. Tulis:\n"
         "1. Gambaran besar (3 bulan, bulanan, mingguan, harian): arah trend utama.\n"
         "2. Intraday (4 jam, 1 jam, 15 menit): kondisi sekarang.\n"
         "3. Level penting hari ini: support & resistance terdekat.\n"
         "4. Skenario: kalau naik tembus level X → target Y; kalau turun tembus level A → target B.\n"
         "5. Satu kalimat kesimpulan bias hari ini (buy/sell/tunggu).\n"
-        "Tutup dengan satu baris pengingat soal risiko.\n\n"
+        "Maksimal sekitar 15 baris.\n\n"
         f"DATA:\n{json.dumps(data, ensure_ascii=False)}"
     )
-    teks = await _tulis(prompt, config.CLAUDE_MODEL, 2500)
+    teks = await _tulis(prompt, config.CLAUDE_MODEL, 1200)
     return teks or _cadangan("☀️ LAPORAN PAGI", data)
 
 
@@ -87,7 +87,7 @@ async def update_intraday(data: dict) -> str:
         "arah 4 jam/1 jam/15 menit, level terdekat yang perlu diawasi, dan bias jangka pendek.\n\n"
         f"DATA:\n{json.dumps(data, ensure_ascii=False)}"
     )
-    teks = await _tulis(prompt, config.CLAUDE_MODEL_FAST, 1200)
+    teks = await _tulis(prompt, config.CLAUDE_MODEL_FAST, 3500)
     return teks or _cadangan("⏱ UPDATE INTRADAY", data)
 
 
