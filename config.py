@@ -12,6 +12,16 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 # Chat ID Telegram yang boleh pakai bot & yang dikirimi laporan (pisahkan pakai koma).
 OWNER_CHAT_IDS = [int(x) for x in os.getenv("OWNER_CHAT_IDS", "").replace(" ", "").split(",") if x]
 
+# Grup Telegram bertopik (opsional). Kalau kosong, laporan dikirim ke chat pribadi owner.
+GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "0") or 0)
+TOPIC_PAGI = int(os.getenv("TOPIC_PAGI", "0") or 0)
+TOPIC_INTRADAY = int(os.getenv("TOPIC_INTRADAY", "0") or 0)
+TOPIC_SCALP = int(os.getenv("TOPIC_SCALP", "0") or 0)
+
+# Otomatis atau cuma kalau diminta (1 = otomatis, 0 = pakai perintah aja)
+AUTO_INTRADAY = os.getenv("AUTO_INTRADAY", "0") == "1"   # pakai AI → default manual biar hemat
+AUTO_SCALP = os.getenv("AUTO_SCALP", "1") == "1"         # tanpa AI → gratis, default otomatis
+
 # Model AI: yang pintar buat laporan pagi, yang cepat/murah buat update & scalping.
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")
 CLAUDE_MODEL_FAST = os.getenv("CLAUDE_MODEL_FAST", "claude-haiku-4-5-20251001")

@@ -34,10 +34,16 @@ _scalp_terakhir: dict = {}  # symbol -> (waktu, arah, entry)
 
 # ---------- helper ----------
 def is_owner(update: Update) -> bool:
-    return update.effective_chat and update.effective_chat.id in config.OWNER_CHAT_IDS
+    """Yang boleh pakai: user owner, baik di chat pribadi maupun di grup."""
+    return bool(update.effective_user and update.effective_user.id in config.OWNER_CHAT_IDS)
 
 
-async def kirim(bot, chat_id: int, teks: str):
+def thread_of(update: Update):
+    m = update.effective_message
+    return m.message_thread_id if m and m.is_topic_message else None
+
+
+async def kirim(bot, chat_id: int, teks: str, thread_id=None):
     """Kirim teks panjang dipecah per 4000 karakter (batas Telegram)."""
     while teks:
         potong = teks[:4000]
@@ -45,11 +51,21 @@ async def kirim(bot, chat_id: int, teks: str):
             pos = potong.rfind("\n")
             if pos > 1000:
                 potong = potong[:pos]
-        await bot.send_message(chat_id=chat_id, text=potong)
+        await bot.send_message(chat_id=chat_id, text=potong, message_thread_id=thread_id)
         teks = teks[len(potong):].lstrip("\n")
 
 
-async def kirim_ke_owner(bot, teks: str):
+TOPIK = {"pagi": "TOPIC_PAGI", "intraday": "TOPIC_INTRADAY", "scalp": "TOPIC_SCALP"}
+
+
+async def kirim_ke_owner(bot, teks: str, jenis: str = "pagi"):
+    """Kirim laporan otomatis: ke topik grup kalau grup sudah diatur, kalau belum ke chat pribadi owner."""
+    if config.GROUP_CHAT_ID:
+        try:
+            await kirim(bot, config.GROUP_CHAT_ID, teks, getattr(config, TOPIK[jenis]) or None)
+            return
+        except Exception as e:
+            logger.error("Gagal kirim ke grup (%s), pindah ke chat pribadi: %s", jenis, e)
     for cid in config.OWNER_CHAT_IDS:
         try:
             await kirim(bot, cid, teks)
@@ -120,7 +136,7 @@ async def scan_scalping(symbols=None, paksa=False) -> list:
 async def job_laporan_pagi(context: ContextTypes.DEFAULT_TYPE):
     try:
         for p in await buat_laporan_pagi():
-            await kirim_ke_owner(context.bot, p)
+            await kirim_ke_owner(context.bot, p, "pagi")
     except Exception as e:
         logger.exception("Laporan pagi gagal: %s", e)
 
@@ -129,7 +145,7 @@ async def job_intraday(context: ContextTypes.DEFAULT_TYPE):
     try:
         teks = await buat_update_intraday()
         if teks:
-            await kirim_ke_owner(context.bot, teks)
+            await kirim_ke_owner(context.bot, teks, "intraday")
     except Exception as e:
         logger.exception("Update intraday gagal: %s", e)
 
@@ -140,7 +156,7 @@ async def job_scalping(context: ContextTypes.DEFAULT_TYPE):
         return
     try:
         for p in await scan_scalping():
-            await kirim_ke_owner(context.bot, p)
+            await kirim_ke_owner(context.bot, p, "scalp")
     except Exception as e:
         logger.exception("Scan scalping gagal: %s", e)
 
@@ -157,7 +173,7 @@ async def job_cek_awal(context: ContextTypes.DEFAULT_TYPE):
 
 # ---------- perintah ----------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    cid = update.effective_chat.id
+    cid = update.effective_user.id
     if not is_owner(update):
         await update.message.reply_text(
             f"Halo! Chat ID kamu: {cid}\nBot ini privat. Kasih ID ini ke admin biar bisa dipakai."
@@ -172,8 +188,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/harga — harga terakhir\n\n"
         "Jadwal otomatis (WIB):\n"
         "07:00 laporan pagi\n"
-        "11:00, 15:00, 19:00, 23:00 update intraday\n"
-        "14:00–24:00 ide scalping kalau ada setup\n\n"
+        + ("11:00, 15:00, 19:00, 23:00 update intraday\n" if config.AUTO_INTRADAY else "Intraday: kirim /intraday kalau butuh\n")
+        + ("14:00–24:00 ide scalping kalau ada setup\n\n" if config.AUTO_SCALP else "Scalping: kirim /scalp kalau butuh\n\n") +
         f"Pair: {', '.join(v['label'] for v in config.SYMBOLS.values())}"
     )
 
@@ -182,7 +198,8 @@ async def _proses(update: Update, context, fungsi, *a):
     if not is_owner(update):
         return
     await update.message.reply_text("Sebentar, lagi dianalisa... ⏳")
-    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
+    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING,
+                                       message_thread_id=thread_of(update))
     try:
         hasil = await fungsi(*a)
     except Exception as e:
@@ -195,14 +212,14 @@ async def _proses(update: Update, context, fungsi, *a):
 async def cmd_laporan(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hasil = await _proses(update, context, buat_laporan_pagi, pilih_symbol(context.args))
     for p in hasil or []:
-        await kirim(context.bot, update.effective_chat.id, p)
+        await kirim(context.bot, update.effective_chat.id, p, thread_of(update))
 
 
 async def cmd_intraday(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update):
         return
     teks = await _proses(update, context, buat_update_intraday, pilih_symbol(context.args))
-    await kirim(context.bot, update.effective_chat.id, teks or "Pasar lagi tutup.")
+    await kirim(context.bot, update.effective_chat.id, teks or "Pasar lagi tutup.", thread_of(update))
 
 
 async def cmd_scalp(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -217,7 +234,7 @@ async def cmd_scalp(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Mending tunggu 👀"
         )
     for p in hasil:
-        await kirim(context.bot, update.effective_chat.id, p)
+        await kirim(context.bot, update.effective_chat.id, p, thread_of(update))
 
 
 async def cmd_harga(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -234,6 +251,15 @@ async def cmd_harga(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(baris))
 
 
+async def cmd_idtopik(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Kirim di dalam topik grup untuk tahu ID grup & topiknya."""
+    if not is_owner(update):
+        return
+    await update.effective_message.reply_text(
+        f"Grup ID: {update.effective_chat.id}\nTopik ID: {thread_of(update) or '-'}"
+    )
+
+
 def main():
     if not config.TELEGRAM_BOT_TOKEN:
         raise SystemExit("TELEGRAM_BOT_TOKEN belum diisi")
@@ -243,14 +269,17 @@ def main():
     app.add_handler(CommandHandler("intraday", cmd_intraday))
     app.add_handler(CommandHandler("scalp", cmd_scalp))
     app.add_handler(CommandHandler("harga", cmd_harga))
+    app.add_handler(CommandHandler("idtopik", cmd_idtopik))
 
     jq = app.job_queue
     h, m = config.JAM_LAPORAN_PAGI
     jq.run_daily(job_laporan_pagi, dtime(h, m, tzinfo=TZ), name="laporan_pagi")
-    for h, m in config.JAM_UPDATE_INTRADAY:
-        jq.run_daily(job_intraday, dtime(h, m, tzinfo=TZ), name=f"intraday_{h}")
+    if config.AUTO_INTRADAY:
+        for h, m in config.JAM_UPDATE_INTRADAY:
+            jq.run_daily(job_intraday, dtime(h, m, tzinfo=TZ), name=f"intraday_{h}")
     jq.run_once(job_cek_awal, when=5, name="cek_awal")
-    jq.run_repeating(job_scalping, interval=config.SCALP_TIAP_MENIT * 60, first=60, name="scalping")
+    if config.AUTO_SCALP:
+        jq.run_repeating(job_scalping, interval=config.SCALP_TIAP_MENIT * 60, first=60, name="scalping")
 
     if not config.OWNER_CHAT_IDS:
         logger.warning("OWNER_CHAT_IDS kosong: kirim /start ke bot untuk lihat chat ID.")
