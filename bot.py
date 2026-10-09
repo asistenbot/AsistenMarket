@@ -145,6 +145,16 @@ async def job_scalping(context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Scan scalping gagal: %s", e)
 
 
+async def job_cek_awal(context: ContextTypes.DEFAULT_TYPE):
+    """Cek semua sumber data sekali waktu bot nyala, hasilnya dicatat di log."""
+    for sym, info in config.SYMBOLS.items():
+        try:
+            c = await get_candles(sym, "15m", 100)
+            logger.info("CEK DATA %s OK: harga %s (%d candle)", sym, round(c[-1]["c"], info["digits"]), len(c))
+        except Exception as e:
+            logger.error("CEK DATA %s GAGAL: %s", sym, e)
+
+
 # ---------- perintah ----------
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cid = update.effective_chat.id
@@ -239,6 +249,7 @@ def main():
     jq.run_daily(job_laporan_pagi, dtime(h, m, tzinfo=TZ), name="laporan_pagi")
     for h, m in config.JAM_UPDATE_INTRADAY:
         jq.run_daily(job_intraday, dtime(h, m, tzinfo=TZ), name=f"intraday_{h}")
+    jq.run_once(job_cek_awal, when=5, name="cek_awal")
     jq.run_repeating(job_scalping, interval=config.SCALP_TIAP_MENIT * 60, first=60, name="scalping")
 
     if not config.OWNER_CHAT_IDS:
