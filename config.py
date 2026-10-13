@@ -41,6 +41,10 @@ SYMBOLS = {
     "ASTERUSDT": {"label": "ASTER/USDT", "source": "binance", "ticker": "ASTERUSDT", "digits": 4},
 }
 
+# Pair yang masuk laporan pagi otomatis (pisahkan koma). Pair lain tetap bisa dicek pakai /laporan <koin>.
+PAGI_SYMBOLS = [s for s in os.getenv("PAGI_SYMBOLS", "XAUUSD,BTCUSDT,ETHUSDT").replace(" ", "").split(",")
+                if s in SYMBOLS]
+
 # Jadwal (jam WIB)
 JAM_LAPORAN_PAGI = (7, 0)
 JAM_UPDATE_INTRADAY = [(11, 0), (15, 0), (19, 0), (23, 0)]

@@ -93,7 +93,7 @@ async def buat_laporan_pagi(symbols=None) -> list:
     pesan = [f"☀️ LAPORAN PAGI — {manager.sekarang()}\n"
              "Gambaran besar (3M, 1M, 1W, 1D) + intraday (4H, 1H, 15m) per pair.\n"
              "⚠️ Analisa teknikal otomatis, bukan saran keuangan."]
-    for sym in symbols or config.SYMBOLS:
+    for sym in symbols or config.PAGI_SYMBOLS:
         data = {sym: await analisa(sym, TF_SWING + TF_INTRADAY)}
         if all("error" in v for v in data[sym].values()):
             pesan.append(f"{config.SYMBOLS[sym]['label']}: data belum bisa diambil.")
@@ -187,13 +187,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text(
         "Asisten Market siap 📊\n\n"
-        "/laporan — laporan lengkap semua timeframe\n"
+        "/laporan — laporan XAU, BTC, ETH (sama kayak laporan pagi)\n"
+        "/laporan semua — laporan semua pair\n"
         "/laporan xau — laporan satu pair (bisa: btc, eth, sol, sui, tao, hype, ondo, aster)\n"
         "/intraday — update 4H, 1H, 15m\n"
         "/scalp — cek ide scalping sekarang\n"
         "/harga — harga terakhir\n\n"
         "Jadwal otomatis (WIB):\n"
-        "07:00 laporan pagi\n"
+        f"07:00 laporan pagi ({', '.join(config.SYMBOLS[s]['label'] for s in config.PAGI_SYMBOLS)})\n"
         + ("11:00, 15:00, 19:00, 23:00 update intraday\n" if config.AUTO_INTRADAY else "Intraday: kirim /intraday kalau butuh\n")
         + ("14:00–24:00 ide scalping kalau ada setup\n\n" if config.AUTO_SCALP else "Scalping: kirim /scalp kalau butuh\n\n") +
         f"Pair: {', '.join(v['label'] for v in config.SYMBOLS.values())}"
@@ -216,7 +217,14 @@ async def _proses(update: Update, context, fungsi, *a):
 
 
 async def cmd_laporan(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    hasil = await _proses(update, context, buat_laporan_pagi, pilih_symbol(context.args))
+    # Tanpa nama koin: sama dengan laporan pagi (XAU, BTC, ETH). Pakai /laporan semua untuk semua pair.
+    if not context.args:
+        symbols = config.PAGI_SYMBOLS
+    elif context.args[0].lower() == "semua":
+        symbols = list(config.SYMBOLS)
+    else:
+        symbols = pilih_symbol(context.args)
+    hasil = await _proses(update, context, buat_laporan_pagi, symbols)
     for p in hasil or []:
         await kirim(context.bot, update.effective_chat.id, p, thread_of(update))
 
