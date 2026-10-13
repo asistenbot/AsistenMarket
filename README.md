@@ -20,6 +20,9 @@ Angka (EMA, RSI, ATR, support/resistance) dihitung kode di `indicators.py`; AI c
 ## Perintah
 `/laporan`, `/laporan xau`, `/laporan semua`, `/intraday`, `/scalp`, `/harga`, `/rekap`, `/rekap 30`
 
+## Sniper entry
+`sniper.py` cari rencana limit order di order block / support-resistance 1H, searah trend 4H/1D, RR 1:3 sampai 1:6. Scan otomatis tiap jam (cuma kirim rencana baru), pantau tiap 5 menit: alarm waktu harga mendekat, waktu entry kena, dan hasil TP/SL. Perintah: `/sniper`, `/sniper xau`, `/sniper aktif`. Topik: `TOPIC_SNIPER` (kosong = ikut topik Scalping).
+
 ## Pencatat hasil scalping
 `tracker.py` mencatat tiap ide scalping ke `/data/sinyal.json` (volume Railway), cek tiap 10 menit apakah kena TP1/TP2/SL, kirim hasilnya ke topik Scalping, dan rekap mingguan tiap Minggu 21:00 WIB.
 

@@ -17,10 +17,12 @@ GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "0") or 0)
 TOPIC_PAGI = int(os.getenv("TOPIC_PAGI", "0") or 0)
 TOPIC_INTRADAY = int(os.getenv("TOPIC_INTRADAY", "0") or 0)
 TOPIC_SCALP = int(os.getenv("TOPIC_SCALP", "0") or 0)
+TOPIC_SNIPER = int(os.getenv("TOPIC_SNIPER", "0") or 0) or TOPIC_SCALP  # kosong → ikut topik Scalping
 
 # Otomatis atau cuma kalau diminta (1 = otomatis, 0 = pakai perintah aja)
 AUTO_INTRADAY = os.getenv("AUTO_INTRADAY", "0") == "1"   # pakai AI → default manual biar hemat
 AUTO_SCALP = os.getenv("AUTO_SCALP", "1") == "1"         # tanpa AI → gratis, default otomatis
+AUTO_SNIPER = os.getenv("AUTO_SNIPER", "1") == "1"       # tanpa AI → gratis, cari rencana sniper tiap jam
 
 # Model AI: yang pintar buat laporan pagi, yang cepat/murah buat update & scalping.
 CLAUDE_MODEL = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6")

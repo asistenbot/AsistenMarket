@@ -22,6 +22,7 @@ from analysts import TF_INTRADAY, TF_SWING, analisa
 from data import get_candles, pasar_buka
 from scalper import cari_setup
 import tracker
+import sniper
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 # Jangan cetak URL lengkap (berisi token) ke log
@@ -62,7 +63,7 @@ async def kirim(bot, chat_id: int, teks: str, thread_id=None):
         teks = teks[len(potong):].lstrip("\n")
 
 
-TOPIK = {"pagi": "TOPIC_PAGI", "intraday": "TOPIC_INTRADAY", "scalp": "TOPIC_SCALP"}
+TOPIK = {"pagi": "TOPIC_PAGI", "intraday": "TOPIC_INTRADAY", "scalp": "TOPIC_SCALP", "sniper": "TOPIC_SNIPER"}
 
 
 async def kirim_ke_owner(bot, teks: str, jenis: str = "pagi"):
@@ -172,6 +173,51 @@ async def job_scalping(context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Scan scalping gagal: %s", e)
 
 
+async def scan_sniper(symbols=None, hanya_baru=True) -> tuple:
+    """Cari rencana sniper. Return (pesan rencana, daftar koin yang belum ada setup)."""
+    pesan, kosong = [], []
+    for sym in symbols or config.SYMBOLS:
+        if not pasar_buka(sym):
+            kosong.append(f"{config.SYMBOLS[sym]['label']} (pasar tutup)")
+            continue
+        try:
+            c1h = await get_candles(sym, "1h", 300)
+            c4h = await get_candles(sym, "4h", 300)
+            c1d = await get_candles(sym, "1d", 300)
+        except Exception as e:
+            logger.warning("Sniper %s gagal ambil data: %s", sym, e)
+            kosong.append(f"{config.SYMBOLS[sym]['label']} (data gagal)")
+            continue
+        r = sniper.cari_rencana(sym, c1h, c4h, c1d)
+        if not r:
+            kosong.append(config.SYMBOLS[sym]["label"])
+            continue
+        baru = sniper.simpan(r)
+        if baru or not hanya_baru:
+            teks = sniper.format_rencana(r)
+            if not baru:
+                teks += "\n(Rencana ini udah pernah dikirim / koin ini lagi ada posisi sniper aktif.)"
+            pesan.append(teks)
+    return pesan, kosong
+
+
+async def job_sniper_scan(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        pesan, _ = await scan_sniper()
+        for p in pesan:
+            await kirim_ke_owner(context.bot, p, "sniper")
+    except Exception as e:
+        logger.exception("Scan sniper gagal: %s", e)
+
+
+async def job_sniper_pantau(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        for p in await sniper.pantau(get_candles, pasar_buka):
+            await kirim_ke_owner(context.bot, p, "sniper")
+    except Exception as e:
+        logger.exception("Pantau sniper gagal: %s", e)
+
+
 async def job_cek_sinyal(context: ContextTypes.DEFAULT_TYPE):
     """Cek sinyal scalping yang masih jalan: sudah kena TP atau SL?"""
     try:
@@ -182,7 +228,7 @@ async def job_cek_sinyal(context: ContextTypes.DEFAULT_TYPE):
 
 
 async def job_rekap_mingguan(context: ContextTypes.DEFAULT_TYPE):
-    await kirim_ke_owner(context.bot, tracker.rekap(7), "scalp")
+    await kirim_ke_owner(context.bot, tracker.rekap(7) + "\n\n" + sniper.rekap(7), "scalp")
 
 
 async def job_cek_awal(context: ContextTypes.DEFAULT_TYPE):
@@ -211,7 +257,9 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/intraday — update 4H, 1H, 15m\n"
         "/scalp — cek ide scalping sekarang\n"
         "/harga — harga terakhir\n"
-        "/rekap — hasil ide scalping 7 hari (bisa /rekap 30)\n\n"
+        "/sniper — rencana limit order sniper (bisa /sniper xau)\n"
+        "/sniper aktif — rencana sniper yang lagi jalan\n"
+        "/rekap — hasil scalping & sniper 7 hari (bisa /rekap 30)\n\n"
         "Jadwal otomatis (WIB):\n"
         f"07:00 laporan pagi ({', '.join(config.SYMBOLS[s]['label'] for s in config.PAGI_SYMBOLS)})\n"
         + ("11:00, 15:00, 19:00, 23:00 update intraday\n" if config.AUTO_INTRADAY else "Intraday: kirim /intraday kalau butuh\n")
@@ -276,7 +324,26 @@ async def cmd_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
     hari = 7
     if context.args and context.args[0].isdigit():
         hari = max(1, min(365, int(context.args[0])))
-    await kirim(context.bot, update.effective_chat.id, tracker.rekap(hari), thread_of(update))
+    await kirim(context.bot, update.effective_chat.id, tracker.rekap(hari) + "\n\n" + sniper.rekap(hari),
+                thread_of(update))
+
+
+async def cmd_sniper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        return
+    if context.args and context.args[0].lower() in ("aktif", "list", "jalan"):
+        await kirim(context.bot, update.effective_chat.id, sniper.format_daftar(), thread_of(update))
+        return
+    hasil = await _proses(update, context, scan_sniper, pilih_symbol(context.args), False)
+    if hasil is None:
+        return
+    pesan, kosong = hasil
+    for p in pesan:
+        await kirim(context.bot, update.effective_chat.id, p, thread_of(update))
+    if kosong:
+        await kirim(context.bot, update.effective_chat.id,
+                    "Belum ada setup sniper (RR minimal 1:3, searah trend 4H/1D) untuk:\n• " + "\n• ".join(kosong),
+                    thread_of(update))
 
 
 async def cmd_harga(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -317,6 +384,7 @@ def main():
     app.add_handler(CommandHandler("harga", cmd_harga))
     app.add_handler(CommandHandler("idtopik", cmd_idtopik))
     app.add_handler(CommandHandler("rekap", cmd_rekap))
+    app.add_handler(CommandHandler("sniper", cmd_sniper))
     app.add_error_handler(on_error)
 
     jq = app.job_queue
@@ -330,6 +398,9 @@ def main():
         jq.run_repeating(job_scalping, interval=config.SCALP_TIAP_MENIT * 60, first=60, name="scalping")
 
     jq.run_repeating(job_cek_sinyal, interval=10 * 60, first=120, name="cek_sinyal")
+    jq.run_repeating(job_sniper_pantau, interval=5 * 60, first=90, name="sniper_pantau")
+    if config.AUTO_SNIPER:
+        jq.run_repeating(job_sniper_scan, interval=60 * 60, first=180, name="sniper_scan")
     jq.run_daily(job_rekap_mingguan, dtime(21, 0, tzinfo=TZ), days=(0,), name="rekap_mingguan")  # Minggu
     if not tracker.penyimpanan_permanen():
         logger.warning("DATA_DIR %s bukan volume: catatan sinyal bakal hilang kalau bot restart.", tracker.DATA_DIR)
