@@ -21,6 +21,7 @@ import manager
 from analysts import TF_INTRADAY, TF_SWING, analisa
 from data import get_candles, pasar_buka
 from scalper import cari_setup
+import tracker
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 # Jangan cetak URL lengkap (berisi token) ke log
@@ -134,7 +135,11 @@ async def scan_scalping(symbols=None, paksa=False) -> list:
             if arah == s["arah"] and time.time() - waktu < 2 * 3600 and abs(entry - s["entry"]) < 2 * s["atr5m"]:
                 continue  # setup mirip baru saja dikirim
         _scalp_terakhir[sym] = (time.time(), s["arah"], s["entry"])
-        pesan.append(manager.format_scalp(sym, s))
+        baru = tracker.catat(sym, s, "manual" if paksa else "otomatis")
+        teks = manager.format_scalp(sym, s)
+        if not baru:
+            teks += "\n(Sinyal searah untuk koin ini masih jalan, yang ini nggak dicatat ulang di rekap.)"
+        pesan.append(teks)
     return pesan
 
 
@@ -167,6 +172,19 @@ async def job_scalping(context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Scan scalping gagal: %s", e)
 
 
+async def job_cek_sinyal(context: ContextTypes.DEFAULT_TYPE):
+    """Cek sinyal scalping yang masih jalan: sudah kena TP atau SL?"""
+    try:
+        for p in await tracker.cek_semua(get_candles):
+            await kirim_ke_owner(context.bot, p, "scalp")
+    except Exception as e:
+        logger.exception("Cek sinyal gagal: %s", e)
+
+
+async def job_rekap_mingguan(context: ContextTypes.DEFAULT_TYPE):
+    await kirim_ke_owner(context.bot, tracker.rekap(7), "scalp")
+
+
 async def job_cek_awal(context: ContextTypes.DEFAULT_TYPE):
     """Cek semua sumber data sekali waktu bot nyala, hasilnya dicatat di log."""
     for sym, info in config.SYMBOLS.items():
@@ -192,7 +210,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/laporan xau — laporan satu pair (bisa: btc, eth, sol, sui, tao, hype, ondo, aster)\n"
         "/intraday — update 4H, 1H, 15m\n"
         "/scalp — cek ide scalping sekarang\n"
-        "/harga — harga terakhir\n\n"
+        "/harga — harga terakhir\n"
+        "/rekap — hasil ide scalping 7 hari (bisa /rekap 30)\n\n"
         "Jadwal otomatis (WIB):\n"
         f"07:00 laporan pagi ({', '.join(config.SYMBOLS[s]['label'] for s in config.PAGI_SYMBOLS)})\n"
         + ("11:00, 15:00, 19:00, 23:00 update intraday\n" if config.AUTO_INTRADAY else "Intraday: kirim /intraday kalau butuh\n")
@@ -251,6 +270,15 @@ async def cmd_scalp(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await kirim(context.bot, update.effective_chat.id, p, thread_of(update))
 
 
+async def cmd_rekap(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_owner(update):
+        return
+    hari = 7
+    if context.args and context.args[0].isdigit():
+        hari = max(1, min(365, int(context.args[0])))
+    await kirim(context.bot, update.effective_chat.id, tracker.rekap(hari), thread_of(update))
+
+
 async def cmd_harga(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update):
         return
@@ -288,6 +316,7 @@ def main():
     app.add_handler(CommandHandler("scalp", cmd_scalp))
     app.add_handler(CommandHandler("harga", cmd_harga))
     app.add_handler(CommandHandler("idtopik", cmd_idtopik))
+    app.add_handler(CommandHandler("rekap", cmd_rekap))
     app.add_error_handler(on_error)
 
     jq = app.job_queue
@@ -299,6 +328,11 @@ def main():
     jq.run_once(job_cek_awal, when=5, name="cek_awal")
     if config.AUTO_SCALP:
         jq.run_repeating(job_scalping, interval=config.SCALP_TIAP_MENIT * 60, first=60, name="scalping")
+
+    jq.run_repeating(job_cek_sinyal, interval=10 * 60, first=120, name="cek_sinyal")
+    jq.run_daily(job_rekap_mingguan, dtime(21, 0, tzinfo=TZ), days=(0,), name="rekap_mingguan")  # Minggu
+    if not tracker.penyimpanan_permanen():
+        logger.warning("DATA_DIR %s bukan volume: catatan sinyal bakal hilang kalau bot restart.", tracker.DATA_DIR)
 
     if not config.OWNER_CHAT_IDS:
         logger.warning("OWNER_CHAT_IDS kosong: kirim /start ke bot untuk lihat chat ID.")

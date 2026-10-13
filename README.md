@@ -18,7 +18,10 @@ Angka (EMA, RSI, ATR, support/resistance) dihitung kode di `indicators.py`; AI c
 - 14:00–24:00 cek scalping tiap 15 menit, kirim kalau ada setup
 
 ## Perintah
-`/laporan`, `/laporan xau`, `/intraday`, `/scalp`, `/harga`
+`/laporan`, `/laporan xau`, `/laporan semua`, `/intraday`, `/scalp`, `/harga`, `/rekap`, `/rekap 30`
+
+## Pencatat hasil scalping
+`tracker.py` mencatat tiap ide scalping ke `/data/sinyal.json` (volume Railway), cek tiap 10 menit apakah kena TP1/TP2/SL, kirim hasilnya ke topik Scalping, dan rekap mingguan tiap Minggu 21:00 WIB.
 
 ## Variables (Railway)
 `TELEGRAM_BOT_TOKEN`, `TWELVEDATA_API_KEY`, `ANTHROPIC_API_KEY` (opsional, tanpa ini laporan tetap jalan versi polos), `OWNER_CHAT_IDS`.
