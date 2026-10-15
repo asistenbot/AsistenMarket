@@ -225,8 +225,48 @@ async def uji_semua(hari: int = 30, symbols=None, strategi: dict | None = None) 
 
 
 def strategi_eksperimen():
-    s = {"lama": cari_setup_dengan([])}
-    for f in ("candle", "tidak_jauh", "volatilitas", "adx", "4h", "volume", "vwap", "ruang", "rsi", "risk_min"):
-        s[f"+{f}"] = cari_setup_dengan([f])
-    s["v2 skor≥3"] = lambda a, b, c, d, dg: cari_setup_v2(a, b, c, d, dg, 3)
-    return s
+    from functools import partial
+    from scalper import f_risk_min
+    r = lambda p: partial(f_risk_min, pct=p)  # noqa: E731
+    return {
+        "lama": cari_setup_dengan([]),
+        "adx": cari_setup_dengan(["adx"]),
+        "risk0.3": cari_setup_dengan(["risk_min"]),
+        "ruang": cari_setup_dengan(["ruang"]),
+        "adx+risk0.2": cari_setup_dengan(["adx", r(0.2)]),
+        "adx+risk0.3": cari_setup_dengan(["adx", r(0.3)]),
+        "adx+risk0.4": cari_setup_dengan(["adx", r(0.4)]),
+        "adx+ruang": cari_setup_dengan(["adx", "ruang"]),
+        "risk0.3+ruang": cari_setup_dengan([r(0.3), "ruang"]),
+        "adx+risk0.3+ruang": cari_setup_dengan(["adx", r(0.3), "ruang"]),
+    }
+
+
+async def eksperimen_dua_periode(hari: int = 60) -> list:
+    """Jalankan eksperimen 60 hari, lalu pisah: 30 hari terbaru vs 30 hari sebelumnya (data uji ulang)."""
+    strategi = strategi_eksperimen()
+    batas = (datetime.now(timezone.utc) - timedelta(days=hari // 2)).isoformat()
+    semua = {k: [] for k in strategi}
+    per_koin = {}
+    for sym in config.SYMBOLS:
+        try:
+            h = await uji_symbol(sym, hari, strategi)
+        except Exception as e:
+            logger.warning("Eksperimen %s gagal: %s", sym, e)
+            continue
+        per_koin[sym] = h
+        for k in strategi:
+            semua[k] += h[k]
+    out = [f"EKSPERIMEN {hari} HARI | kolom: [30 hari sebelumnya] || [30 hari terbaru] (bersih setelah biaya)"]
+    for k in strategi:
+        a = statistik([t for t in semua[k] if t["waktu"] < batas])
+        b = statistik([t for t in semua[k] if t["waktu"] >= batas])
+        out.append(f"{k:<18} | {a['n']:>3} sin WR {a['wr']:.0f}% {a['net_r']:+.1f}R PF {a['pf']:.2f} "
+                   f"|| {b['n']:>3} sin WR {b['wr']:.0f}% {b['net_r']:+.1f}R PF {b['pf']:.2f}")
+    for k in ("lama", "adx+risk0.3", "adx+risk0.3+ruang"):
+        out.append(f"PER KOIN {k}:")
+        for sym, h in per_koin.items():
+            a = statistik([t for t in h[k] if t["waktu"] < batas])
+            b = statistik([t for t in h[k] if t["waktu"] >= batas])
+            out.append(f"  {sym:<10} | {a['n']:>3} sin {a['net_r']:+.1f}R || {b['n']:>3} sin {b['net_r']:+.1f}R")
+    return out

@@ -267,7 +267,8 @@ def cari_setup_dengan(filters: list):
         if not d:
             return None
         for f in filters:
-            if not FILTER[f](c5, c15, c1h, c4h, d):
+            fn_f = FILTER[f] if isinstance(f, str) else f
+            if not fn_f(c5, c15, c1h, c4h, d):
                 return None
         return d
     return fn
