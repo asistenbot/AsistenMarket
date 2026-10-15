@@ -20,7 +20,9 @@ import config
 import manager
 from analysts import TF_INTRADAY, TF_SWING, analisa
 from data import get_candles, pasar_buka
-from scalper import cari_setup
+from scalper import cari_setup, cari_setup_v2
+import backtest
+import asyncio
 import tracker
 import sniper
 
@@ -124,10 +126,14 @@ async def scan_scalping(symbols=None, paksa=False) -> list:
             c5 = await get_candles(sym, "5m", 300)
             c15 = await get_candles(sym, "15m", 300)
             c1h = await get_candles(sym, "1h", 300)
+            c4h = await get_candles(sym, "4h", 150) if config.SCALP_VERSI == "v2" else None
         except Exception as e:
             logger.warning("Scan %s gagal: %s", sym, e)
             continue
-        s = cari_setup(c5, c15, c1h, config.SYMBOLS[sym]["digits"])
+        if config.SCALP_VERSI == "v2":
+            s = cari_setup_v2(c5, c15, c1h, c4h, config.SYMBOLS[sym]["digits"], config.SCALP_SKOR_MIN)
+        else:
+            s = cari_setup(c5, c15, c1h, config.SYMBOLS[sym]["digits"])
         if not s:
             continue
         last = _scalp_terakhir.get(sym)
@@ -259,7 +265,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/harga — harga terakhir\n"
         "/sniper — rencana limit order sniper (bisa /sniper xau)\n"
         "/sniper aktif — rencana sniper yang lagi jalan\n"
-        "/rekap — hasil scalping & sniper 7 hari (bisa /rekap 30)\n\n"
+        "/rekap — hasil scalping & sniper 7 hari (bisa /rekap 30)\n"
+        "/uji — tes strategi scalping ke data 30 hari terakhir (bisa /uji 14)\n\n"
         "Jadwal otomatis (WIB):\n"
         f"07:00 laporan pagi ({', '.join(config.SYMBOLS[s]['label'] for s in config.PAGI_SYMBOLS)})\n"
         + ("11:00, 15:00, 19:00, 23:00 update intraday\n" if config.AUTO_INTRADAY else "Intraday: kirim /intraday kalau butuh\n")
@@ -346,6 +353,47 @@ async def cmd_sniper(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     thread_of(update))
 
 
+_uji_jalan = False
+
+
+async def _uji_background(bot, chat_id, thread_id, hari):
+    global _uji_jalan
+    try:
+        teks, _ = await backtest.uji_semua(hari)
+        await kirim(bot, chat_id, teks, thread_id)
+    except Exception as e:
+        logger.exception("Backtest gagal: %s", e)
+        await kirim(bot, chat_id, f"Backtest gagal: {e}", thread_id)
+    finally:
+        _uji_jalan = False
+
+
+async def cmd_uji(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global _uji_jalan
+    if not is_owner(update):
+        return
+    if _uji_jalan:
+        await update.effective_message.reply_text("Backtest masih jalan, tunggu hasilnya dulu ya.")
+        return
+    hari = 30
+    if context.args and context.args[0].isdigit():
+        hari = max(3, min(60, int(context.args[0])))
+    _uji_jalan = True
+    await update.effective_message.reply_text(
+        f"🧪 Lagi ngetes strategi scalping ke data {hari} hari terakhir untuk semua koin. "
+        "Butuh beberapa menit, hasilnya nanti dikirim ke sini.")
+    asyncio.create_task(_uji_background(context.bot, update.effective_chat.id, thread_of(update), hari))
+
+
+async def job_backtest_awal(context: ContextTypes.DEFAULT_TYPE):
+    try:
+        teks, _ = await backtest.uji_semua(30)
+        for baris in teks.split("\n"):
+            logger.info("HASIL BACKTEST | %s", baris)
+    except Exception as e:
+        logger.exception("Backtest awal gagal: %s", e)
+
+
 async def cmd_harga(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_owner(update):
         return
@@ -385,6 +433,7 @@ def main():
     app.add_handler(CommandHandler("idtopik", cmd_idtopik))
     app.add_handler(CommandHandler("rekap", cmd_rekap))
     app.add_handler(CommandHandler("sniper", cmd_sniper))
+    app.add_handler(CommandHandler("uji", cmd_uji))
     app.add_error_handler(on_error)
 
     jq = app.job_queue
@@ -394,6 +443,8 @@ def main():
         for h, m in config.JAM_UPDATE_INTRADAY:
             jq.run_daily(job_intraday, dtime(h, m, tzinfo=TZ), name=f"intraday_{h}")
     jq.run_once(job_cek_awal, when=5, name="cek_awal")
+    if config.BACKTEST_SAAT_START:
+        jq.run_once(job_backtest_awal, when=30, name="backtest_awal")
     if config.AUTO_SCALP:
         jq.run_repeating(job_scalping, interval=config.SCALP_TIAP_MENIT * 60, first=60, name="scalping")
 
@@ -407,7 +458,8 @@ def main():
 
     if not config.OWNER_CHAT_IDS:
         logger.warning("OWNER_CHAT_IDS kosong: kirim /start ke bot untuk lihat chat ID.")
-    logger.info("Asisten Market jalan. Pair: %s", ", ".join(config.SYMBOLS))
+    logger.info("Asisten Market jalan. Pair: %s | scalper %s (skor min %s)", ", ".join(config.SYMBOLS),
+                config.SCALP_VERSI, config.SCALP_SKOR_MIN)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

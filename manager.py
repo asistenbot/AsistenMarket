@@ -102,5 +102,7 @@ def format_scalp(symbol: str, s: dict) -> str:
         f"TP1: {s['tp1']} (1.5R)\n"
         f"TP2: {s['tp2']} (2.5R)\n\n"
         f"Trend 15m: {s['trend_15m']}, 1h: {s['trend_1h']} | RSI 5m: {s['rsi5m']}\n"
-        "⚠️ Cek chart dulu sebelum entry. Pakai lot kecil, SL wajib dipasang."
+        + (f"Kualitas: {'★' * s['skor']}{'☆' * (s['skor_maks'] - s['skor'])} ({s['skor']}/{s['skor_maks']})\n"
+           f"Alasan: {', '.join(s['alasan']) or '-'}\n" if "skor" in s else "")
+        + "⚠️ Cek chart dulu sebelum entry. Pakai lot kecil, SL wajib dipasang."
     )

@@ -81,3 +81,99 @@ def cari_setup(c5: list, c15: list, c1h: list, digits: int = 2) -> dict | None:
         "trend_15m": b15,
         "trend_1h": b1h,
     }
+
+
+# ======================================================================
+# Versi 2: trigger sama, tapi pakai filter wajib + skor kualitas setup.
+# ======================================================================
+from indicators import adx, median, pivots, vwap_harian  # noqa: E402
+
+SKOR_MIN = 3  # default; bisa diubah dari env SCALP_SKOR_MIN
+
+
+def cari_setup_v2(c5: list, c15: list, c1h: list, c4h: list | None = None, digits: int = 2,
+                  skor_min: int | None = None) -> dict | None:
+    """Sama seperti cari_setup, ditambah:
+    Wajib : candle sinyal kuat (badan besar, tutup dekat ujung), harga nggak kejauhan dari EMA50,
+            volatilitas normal (nggak mati, nggak lagi spike berita).
+    Skor  : ADX 15m >= 20, trend 4H searah, volume di atas rata-rata, posisi vs VWAP harian,
+            masih ada ruang ke TP1 sebelum ketemu resistance/support 1H, RSI di zona sehat.
+    """
+    dasar = cari_setup(c5, c15, c1h, digits)
+    if not dasar:
+        return None
+    skor_min = SKOR_MIN if skor_min is None else skor_min
+    buy = dasar["arah"] == "BUY"
+    c5x, c15x, c1hx = c5[:-1], c15[:-1], c1h[:-1]
+    last = c5x[-1]
+    a = dasar["atr5m"]
+    close = last["c"]
+
+    # --- filter wajib ---
+    rng = last["h"] - last["l"]
+    if rng <= 0:
+        return None
+    body = abs(last["c"] - last["o"])
+    posisi_tutup = (last["c"] - last["l"]) / rng if buy else (last["h"] - last["c"]) / rng
+    if body < 0.4 * rng or posisi_tutup < 0.65:
+        return None  # candle sinyal lemah / banyak ekor
+    e50 = ema([c["c"] for c in c5x], 50)[-1]
+    if abs(close - e50) > 2.5 * a:
+        return None  # udah kejauhan, rawan balik
+    trs = [max(c5x[i]["h"] - c5x[i]["l"], abs(c5x[i]["h"] - c5x[i - 1]["c"]), abs(c5x[i]["l"] - c5x[i - 1]["c"]))
+           for i in range(max(1, len(c5x) - 200), len(c5x))]
+    med = median(trs)
+    if med > 0 and not (0.6 <= a / med <= 2.5):
+        return None  # pasar terlalu sepi atau lagi meledak (berita)
+
+    # --- skor kualitas ---
+    skor, maks, alasan = 0, 0, []
+
+    maks += 1
+    ad = adx(c15x[-120:])
+    if ad is not None and ad >= 20:
+        skor += 1
+        alasan.append(f"trend 15m kuat (ADX {ad:.0f})")
+
+    if c4h:
+        maks += 1
+        b4 = _bias(c4h[:-1])
+        if b4 == ("naik" if buy else "turun"):
+            skor += 1
+            alasan.append("searah trend 4H")
+
+    vols = [c["v"] for c in c5x[-21:-1]]
+    if sum(vols) > 0:
+        maks += 1
+        if last["v"] >= 1.2 * (sum(vols) / len(vols)):
+            skor += 1
+            alasan.append("volume naik")
+        maks += 1
+        vw = vwap_harian(c5x)
+        if vw is not None and ((close > vw) if buy else (close < vw)):
+            skor += 1
+            alasan.append("di sisi benar VWAP")
+
+    maks += 1
+    highs, lows = pivots(c1hx[-120:])
+    jarak_tp1 = abs(dasar["tp1"] - dasar["entry"])
+    if buy:
+        hambatan = [h for h in highs if h > close]
+        ruang = (min(hambatan) - close) if hambatan else float("inf")
+    else:
+        hambatan = [l for l in lows if l < close]
+        ruang = (close - max(hambatan)) if hambatan else float("inf")
+    if ruang >= jarak_tp1:
+        skor += 1
+        alasan.append("jalan ke TP1 bersih")
+
+    maks += 1
+    r = dasar["rsi5m"]
+    if (45 <= r <= 65) if buy else (35 <= r <= 55):
+        skor += 1
+        alasan.append("RSI sehat")
+
+    if skor < min(skor_min, maks):
+        return None
+    dasar.update({"skor": skor, "skor_maks": maks, "alasan": alasan})
+    return dasar

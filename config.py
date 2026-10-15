@@ -53,3 +53,8 @@ JAM_UPDATE_INTRADAY = [(11, 0), (15, 0), (19, 0), (23, 0)]
 SCALP_JAM_MULAI = 14   # sesi London
 SCALP_JAM_SELESAI = 24  # sampai tengah malam (sesi New York)
 SCALP_TIAP_MENIT = 15
+
+# Versi scalper: "lama" atau "v2" (pakai filter tambahan + skor kualitas)
+SCALP_VERSI = os.getenv("SCALP_VERSI", "lama")
+SCALP_SKOR_MIN = int(os.getenv("SCALP_SKOR_MIN", "3"))
+BACKTEST_SAAT_START = os.getenv("BACKTEST_SAAT_START", "0") == "1"

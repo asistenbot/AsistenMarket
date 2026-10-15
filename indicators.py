@@ -130,3 +130,54 @@ def summarize(candles: list, digits: int = 2) -> dict:
         "low_20_candle": r(min(c["l"] for c in recent)),
         "jumlah_candle": len(candles),
     }
+
+
+def adx(candles: list, period: int = 14) -> float | None:
+    """ADX: kekuatan trend (di atas ~20 = ada trend, di bawah = pasar ngambang/choppy)."""
+    if len(candles) < period * 2 + 1:
+        return None
+    trs, pdm, ndm = [], [], []
+    for i in range(1, len(candles)):
+        h, l, pc = candles[i]["h"], candles[i]["l"], candles[i - 1]["c"]
+        up = h - candles[i - 1]["h"]
+        dn = candles[i - 1]["l"] - l
+        trs.append(max(h - l, abs(h - pc), abs(l - pc)))
+        pdm.append(up if up > dn and up > 0 else 0.0)
+        ndm.append(dn if dn > up and dn > 0 else 0.0)
+    tr_s, p_s, n_s = sum(trs[:period]), sum(pdm[:period]), sum(ndm[:period])
+    dxs = []
+    for i in range(period, len(trs)):
+        tr_s = tr_s - tr_s / period + trs[i]
+        p_s = p_s - p_s / period + pdm[i]
+        n_s = n_s - n_s / period + ndm[i]
+        if tr_s == 0:
+            continue
+        pdi, ndi = 100 * p_s / tr_s, 100 * n_s / tr_s
+        dxs.append(100 * abs(pdi - ndi) / (pdi + ndi) if pdi + ndi else 0.0)
+    if len(dxs) < period:
+        return None
+    a = sum(dxs[:period]) / period
+    for d in dxs[period:]:
+        a = (a * (period - 1) + d) / period
+    return a
+
+
+def vwap_harian(candles: list) -> float | None:
+    """VWAP sejak 00:00 UTC hari ini. None kalau data volume kosong (misal emas dari TwelveData)."""
+    if not candles:
+        return None
+    hari = candles[-1]["t"].date()
+    pv = vol = 0.0
+    for c in reversed(candles):
+        if c["t"].date() != hari:
+            break
+        tp = (c["h"] + c["l"] + c["c"]) / 3
+        pv += tp * c["v"]
+        vol += c["v"]
+    return pv / vol if vol > 0 else None
+
+
+def median(values: list) -> float:
+    s = sorted(values)
+    n = len(s)
+    return (s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2) if n else 0.0
