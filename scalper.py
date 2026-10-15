@@ -272,3 +272,21 @@ def cari_setup_dengan(filters: list):
                 return None
         return d
     return fn
+
+
+# ======================================================================
+# Versi 3 (dipilih dari backtest 60 hari, konsisten untung di 2 periode setelah dipotong fee):
+# setup lama + trend 15m kuat (ADX >= 20) + SL minimal 0.2% dari harga.
+# ======================================================================
+def cari_setup_v3(c5: list, c15: list, c1h: list, digits: int = 2, risk_min_pct: float = 0.2) -> dict | None:
+    d = cari_setup(c5, c15, c1h, digits)
+    if not d:
+        return None
+    ad = adx(c15[:-1][-120:])
+    if ad is None or ad < 20:
+        return None  # trend 15m lemah / pasar ngambang
+    risk_pct = d["risk_poin"] / d["entry"] * 100 if d["entry"] else 0
+    if risk_pct < risk_min_pct:
+        return None  # SL terlalu tipis, profit bakal habis kemakan fee
+    d["alasan"] = [f"trend 15m kuat (ADX {ad:.0f})", f"jarak SL {risk_pct:.2f}% (cukup buat nutup fee)"]
+    return d

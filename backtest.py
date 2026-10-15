@@ -108,10 +108,10 @@ BIAYA_PCT = {"binance": 0.10, "twelvedata": 0.02}
 
 
 def strategi_standar():
+    from scalper import cari_setup_v3
     return {
+        "v3 (dipakai)": lambda a, b, c, d, dg: cari_setup_v3(a, b, c, dg),
         "lama": lambda a, b, c, d, dg: cari_setup(a, b, c, dg),
-        "v2 skor≥3": lambda a, b, c, d, dg: cari_setup_v2(a, b, c, d, dg, 3),
-        "v2 skor≥5": lambda a, b, c, d, dg: cari_setup_v2(a, b, c, d, dg, 5),
     }
 
 

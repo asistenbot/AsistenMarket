@@ -54,7 +54,9 @@ SCALP_JAM_MULAI = 14   # sesi London
 SCALP_JAM_SELESAI = 24  # sampai tengah malam (sesi New York)
 SCALP_TIAP_MENIT = 15
 
-# Versi scalper: "lama" atau "v2" (pakai filter tambahan + skor kualitas)
-SCALP_VERSI = os.getenv("SCALP_VERSI", "lama")
+# Versi scalper: "v3" (default, hasil backtest terbaik), "v2", atau "lama"
+SCALP_VERSI = os.getenv("SCALP_VERSI", "v3")
+# Pair yang nggak dikirimi ide scalping otomatis (hasil backtest jelek). Tetap ada di laporan & sniper.
+SCALP_SKIP = [s for s in os.getenv("SCALP_SKIP", "XAUUSD").replace(" ", "").split(",") if s]
 SCALP_SKOR_MIN = int(os.getenv("SCALP_SKOR_MIN", "3"))
 BACKTEST_SAAT_START = os.getenv("BACKTEST_SAAT_START", "0") == "1"

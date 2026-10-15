@@ -23,6 +23,11 @@ Angka (EMA, RSI, ATR, support/resistance) dihitung kode di `indicators.py`; AI c
 ## Sniper entry
 `sniper.py` cari rencana limit order di order block / support-resistance 1H, searah trend 4H/1D, RR 1:3 sampai 1:6. Scan otomatis tiap jam (cuma kirim rencana baru), pantau tiap 5 menit: alarm waktu harga mendekat, waktu entry kena, dan hasil TP/SL. Perintah: `/sniper`, `/sniper xau`, `/sniper aktif`. Topik: `TOPIC_SNIPER` (kosong = ikut topik Scalping).
 
+## Scalper v3 (dipakai) & backtest
+Dipilih lewat backtest 60 hari ke data asli, sudah dipotong biaya (crypto 0.1%, emas 0.02% per transaksi), dicek di 2 periode terpisah.
+v3 = setup lama + ADX 15m >= 20 + jarak SL minimal 0.2% dari harga. XAU dikeluarkan dari scalping otomatis (SCALP_SKIP).
+`/uji` atau `/uji 14` menjalankan backtest v3 vs versi lama. Env `BACKTEST_SAAT_START=1` menjalankan eksperimen 60 hari waktu bot nyala (hasil di log).
+
 ## Pencatat hasil scalping
 `tracker.py` mencatat tiap ide scalping ke `/data/sinyal.json` (volume Railway), cek tiap 10 menit apakah kena TP1/TP2/SL, kirim hasilnya ke topik Scalping, dan rekap mingguan tiap Minggu 21:00 WIB.
 

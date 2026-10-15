@@ -20,7 +20,7 @@ import config
 import manager
 from analysts import TF_INTRADAY, TF_SWING, analisa
 from data import get_candles, pasar_buka
-from scalper import cari_setup, cari_setup_v2
+from scalper import cari_setup, cari_setup_v2, cari_setup_v3
 import backtest
 import asyncio
 import tracker
@@ -119,7 +119,7 @@ async def buat_update_intraday(symbols=None) -> str | None:
 async def scan_scalping(symbols=None, paksa=False) -> list:
     """Return list pesan ide scalping. paksa=True: abaikan filter anti-spam."""
     pesan = []
-    for sym in symbols or config.SYMBOLS:
+    for sym in symbols or [s for s in config.SYMBOLS if s not in config.SCALP_SKIP]:
         if not pasar_buka(sym):
             continue
         try:
@@ -130,7 +130,9 @@ async def scan_scalping(symbols=None, paksa=False) -> list:
         except Exception as e:
             logger.warning("Scan %s gagal: %s", sym, e)
             continue
-        if config.SCALP_VERSI == "v2":
+        if config.SCALP_VERSI == "v3":
+            s = cari_setup_v3(c5, c15, c1h, config.SYMBOLS[sym]["digits"])
+        elif config.SCALP_VERSI == "v2":
             s = cari_setup_v2(c5, c15, c1h, c4h, config.SYMBOLS[sym]["digits"], config.SCALP_SKOR_MIN)
         else:
             s = cari_setup(c5, c15, c1h, config.SYMBOLS[sym]["digits"])
