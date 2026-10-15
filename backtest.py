@@ -14,7 +14,7 @@ import httpx
 
 import config
 from data import BINANCE_TF, TWELVE_TF, _candle, _ms, pasar_buka  # noqa: F401
-from scalper import cari_setup, cari_setup_v2
+from scalper import cari_setup, cari_setup_v2, cari_setup_dengan
 
 logger = logging.getLogger(__name__)
 
@@ -103,24 +103,39 @@ def _potong(candles: list, waktu: list, sampai: datetime, menit: int, jumlah: in
     return tutup + tutup[-1:] if tutup else []
 
 
-async def uji_symbol(symbol: str, hari: int = 30, jam_mulai: int | None = None, jam_selesai: int | None = None) -> dict:
-    n5 = hari * 288 + 400
-    c5 = await history(symbol, "5m", n5)
+# Biaya bolak-balik (buka + tutup) dalam % harga. Crypto: fee taker futures ~0.05% x2. Emas: spread.
+BIAYA_PCT = {"binance": 0.10, "twelvedata": 0.02}
+
+
+def strategi_standar():
+    return {
+        "lama": lambda a, b, c, d, dg: cari_setup(a, b, c, dg),
+        "v2 skor≥3": lambda a, b, c, d, dg: cari_setup_v2(a, b, c, d, dg, 3),
+        "v2 skor≥5": lambda a, b, c, d, dg: cari_setup_v2(a, b, c, d, dg, 5),
+    }
+
+
+async def uji_symbol(symbol: str, hari: int = 30, strategi: dict | None = None,
+                     jam_mulai: int | None = None, jam_selesai: int | None = None) -> dict:
+    strategi = strategi or strategi_standar()
+    c5 = await history(symbol, "5m", hari * 288 + 400)
     c15 = await history(symbol, "15m", hari * 96 + 400)
     c1h = await history(symbol, "1h", hari * 24 + 400)
     c4h = await history(symbol, "4h", hari * 6 + 400)
-    t5, t15, t1h, t4h = ([c["t"] for c in x] for x in (c5, c15, c1h, c4h))
+    t15, t1h, t4h = ([c["t"] for c in x] for x in (c15, c1h, c4h))
     digits = config.SYMBOLS[symbol]["digits"]
+    biaya = BIAYA_PCT[config.SYMBOLS[symbol]["source"]]
     jm = config.SCALP_JAM_MULAI if jam_mulai is None else jam_mulai
     js = config.SCALP_JAM_SELESAI if jam_selesai is None else jam_selesai
 
-    hasil = {"lama": [], "v2": {m: [] for m in range(7)}}
-    sibuk_lama = -1
-    sibuk_v2 = {m: -1 for m in range(7)}
+    hasil = {k: [] for k in strategi}
+    sibuk = {k: -1 for k in strategi}
     for i in range(300, len(c5) - 1, 3):  # tiap 15 menit
-        sekarang = c5[i]["t"] + timedelta(minutes=5)  # waktu candle i selesai
+        sekarang = c5[i]["t"] + timedelta(minutes=5)
         jam_wib = (sekarang + timedelta(hours=7)).hour
         if not (jm <= jam_wib < js):
+            continue
+        if all(i <= b for b in sibuk.values()):
             continue
         s5 = c5[max(0, i - 299):i + 1] + [c5[i]]
         s15 = _potong(c15, t15, sekarang, 15)
@@ -128,25 +143,26 @@ async def uji_symbol(symbol: str, hari: int = 30, jam_mulai: int | None = None, 
         s4h = _potong(c4h, t4h, sekarang, 240, 150)
         if len(s15) < 61 or len(s1h) < 61:
             continue
-        if i > sibuk_lama:
-            s = cari_setup(s5, s15, s1h, digits)
-            if s:
-                h, durasi = _hasil(s, c5[i + 1:])
-                if h:
-                    sibuk_lama = i + durasi
-                    hasil["lama"].append({"hasil": h, "r": R_HASIL[h], "waktu": sekarang.isoformat()})
-        if any(i > b for b in sibuk_v2.values()):
-            s = cari_setup_v2(s5, s15, s1h, s4h, digits, skor_min=0)
-            if s:
-                h, durasi = _hasil(s, c5[i + 1:])
-                if h:
-                    for m in range(7):
-                        if s["skor"] >= m and i > sibuk_v2[m]:
-                            sibuk_v2[m] = i + durasi
-                            hasil["v2"][m].append({"hasil": h, "r": R_HASIL[h], "skor": s["skor"],
-                                                   "waktu": sekarang.isoformat()})
+        cache = {}
+        for nama, fn in strategi.items():
+            if i <= sibuk[nama]:
+                continue
+            s = fn(s5, s15, s1h, s4h, digits)
+            if not s:
+                continue
+            key = (s["arah"], s["entry"], s["sl"])
+            if key not in cache:
+                cache[key] = _hasil(s, c5[i + 1:])
+            h, durasi = cache[key]
+            if not h:
+                continue
+            sibuk[nama] = i + durasi
+            risk_pct = s["risk_poin"] / s["entry"] * 100 if s["entry"] else 1
+            biaya_r = biaya / risk_pct if risk_pct else 0
+            hasil[nama].append({"hasil": h, "r": R_HASIL[h], "r_net": R_HASIL[h] - biaya_r,
+                                "skor": s.get("skor"), "waktu": sekarang.isoformat()})
         if i % 300 == 0:
-            await asyncio.sleep(0)  # kasih napas ke bot biar tetap responsif
+            await asyncio.sleep(0)
     return hasil
 
 
@@ -155,55 +171,62 @@ def statistik(trades: list) -> dict:
     menang = sum(1 for t in trades if t["hasil"] in ("tp1", "tp2"))
     kalah = sum(1 for t in trades if t["hasil"] == "sl")
     total_r = sum(t["r"] for t in trades)
-    untung = sum(t["r"] for t in trades if t["r"] > 0)
-    rugi = -sum(t["r"] for t in trades if t["r"] < 0)
+    net = [t.get("r_net", t["r"]) for t in trades]
+    untung = sum(x for x in net if x > 0)
+    rugi = -sum(x for x in net if x < 0)
     return {
         "n": n, "menang": menang, "kalah": kalah,
         "wr": menang / (menang + kalah) * 100 if menang + kalah else 0,
         "total_r": total_r, "rata_r": total_r / n if n else 0,
+        "net_r": sum(net), "rata_net": sum(net) / n if n else 0,
         "pf": untung / rugi if rugi else (float("inf") if untung else 0),
     }
 
 
 def _baris(nama: str, st: dict) -> str:
     pf = "∞" if st["pf"] == float("inf") else f"{st['pf']:.2f}"
-    return (f"{nama}: {st['n']} sinyal | WR {st['wr']:.0f}% | total {st['total_r']:+.1f}R | "
-            f"rata2 {st['rata_r']:+.2f}R/sinyal | PF {pf}")
+    return (f"{nama}: {st['n']} sinyal | WR {st['wr']:.0f}% | kotor {st['total_r']:+.1f}R | "
+            f"bersih {st['net_r']:+.1f}R ({st['rata_net']:+.2f}R/sinyal) | PF {pf}")
 
 
-async def uji_semua(hari: int = 30, symbols=None) -> tuple:
+async def uji_semua(hari: int = 30, symbols=None, strategi: dict | None = None) -> tuple:
     """Return (teks laporan, data mentah)."""
-    semua = {"lama": [], "v2": {m: [] for m in range(7)}}
+    strategi = strategi or strategi_standar()
+    semua = {k: [] for k in strategi}
     per_koin = {}
     gagal = []
     for sym in symbols or config.SYMBOLS:
         try:
-            h = await uji_symbol(sym, hari)
+            h = await uji_symbol(sym, hari, strategi)
         except Exception as e:
             logger.warning("Backtest %s gagal: %s", sym, e)
             gagal.append(sym)
             continue
         per_koin[sym] = h
-        semua["lama"] += h["lama"]
-        for m in range(7):
-            semua["v2"][m] += h["v2"][m]
-        logger.info("BACKTEST %s: lama %s | v2>=3 %s", sym, statistik(h["lama"]), statistik(h["v2"][3]))
+        for k in strategi:
+            semua[k] += h[k]
 
-    baris = [f"🧪 BACKTEST SCALPING {hari} HARI (jam {config.SCALP_JAM_MULAI}:00–{config.SCALP_JAM_SELESAI}:00 WIB)", ""]
-    baris.append(_baris("Versi lama", statistik(semua["lama"])))
+    baris = [f"🧪 BACKTEST SCALPING {hari} HARI (jam {config.SCALP_JAM_MULAI}:00–{config.SCALP_JAM_SELESAI}:00 WIB)",
+             "Sudah dipotong biaya: crypto 0.1%, emas 0.02% per transaksi.", ""]
+    for k in strategi:
+        baris.append(_baris(k, statistik(semua[k])))
     baris.append("")
-    baris.append("Versi 2 berdasarkan skor minimal:")
-    for m in range(7):
-        if semua["v2"][m]:
-            baris.append("  " + _baris(f"skor ≥{m}", statistik(semua["v2"][m])))
-    baris.append("")
-    baris.append("Per koin (lama → v2 skor ≥3):")
+    pertama = list(strategi)[0]
+    baris.append(f"Per koin ({pertama}, bersih):")
     for sym, h in per_koin.items():
-        a, b = statistik(h["lama"]), statistik(h["v2"][3])
+        st = statistik(h[pertama])
         nama = config.SYMBOLS[sym]["label"].split(" ")[0]
-        baris.append(f"• {nama}: {a['n']} sinyal {a['total_r']:+.1f}R → {b['n']} sinyal {b['total_r']:+.1f}R")
+        baris.append(f"• {nama}: {st['n']} sinyal, WR {st['wr']:.0f}%, {st['net_r']:+.1f}R")
     if gagal:
         baris.append(f"\nGagal ambil data: {', '.join(gagal)}")
-    baris.append("\nPF (profit factor) = total untung ÷ total rugi. Di atas 1 = untung, makin tinggi makin bagus.")
-    baris.append("Hasil masa lalu bukan jaminan ke depan, spread & slippage broker belum dihitung.")
+    baris.append("\nR = kelipatan risiko. PF = total untung ÷ total rugi (di atas 1 = untung).")
+    baris.append("Hasil masa lalu bukan jaminan ke depan.")
     return "\n".join(baris), {"semua": semua, "per_koin": per_koin}
+
+
+def strategi_eksperimen():
+    s = {"lama": cari_setup_dengan([])}
+    for f in ("candle", "tidak_jauh", "volatilitas", "adx", "4h", "volume", "vwap", "ruang", "rsi", "risk_min"):
+        s[f"+{f}"] = cari_setup_dengan([f])
+    s["v2 skor≥3"] = lambda a, b, c, d, dg: cari_setup_v2(a, b, c, d, dg, 3)
+    return s

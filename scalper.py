@@ -177,3 +177,97 @@ def cari_setup_v2(c5: list, c15: list, c1h: list, c4h: list | None = None, digit
         return None
     dasar.update({"skor": skor, "skor_maks": maks, "alasan": alasan})
     return dasar
+
+
+# ======================================================================
+# Filter terpisah (dipakai buat eksperimen backtest & bisa dirakit ulang)
+# ======================================================================
+def _ctx(c5, c15, c1h, c4h, dasar):
+    buy = dasar["arah"] == "BUY"
+    c5x = c5[:-1]
+    return buy, c5x, c15[:-1], c1h[:-1], (c4h[:-1] if c4h else None), c5x[-1], dasar["atr5m"], c5x[-1]["c"]
+
+
+def f_candle(c5, c15, c1h, c4h, d):
+    buy, c5x, *_, last, a, close = _ctx(c5, c15, c1h, c4h, d)
+    rng = last["h"] - last["l"]
+    if rng <= 0:
+        return False
+    pos = (last["c"] - last["l"]) / rng if buy else (last["h"] - last["c"]) / rng
+    return abs(last["c"] - last["o"]) >= 0.4 * rng and pos >= 0.65
+
+
+def f_tidak_jauh(c5, c15, c1h, c4h, d):
+    buy, c5x, *_, last, a, close = _ctx(c5, c15, c1h, c4h, d)
+    return abs(close - ema([c["c"] for c in c5x], 50)[-1]) <= 2.5 * a
+
+
+def f_volatilitas(c5, c15, c1h, c4h, d):
+    buy, c5x, *_, last, a, close = _ctx(c5, c15, c1h, c4h, d)
+    trs = [max(c5x[i]["h"] - c5x[i]["l"], abs(c5x[i]["h"] - c5x[i - 1]["c"]), abs(c5x[i]["l"] - c5x[i - 1]["c"]))
+           for i in range(max(1, len(c5x) - 200), len(c5x))]
+    med = median(trs)
+    return med <= 0 or 0.6 <= a / med <= 2.5
+
+
+def f_adx(c5, c15, c1h, c4h, d):
+    ad = adx(c15[:-1][-120:])
+    return ad is not None and ad >= 20
+
+
+def f_4h(c5, c15, c1h, c4h, d):
+    if not c4h:
+        return True
+    return _bias(c4h[:-1]) == ("naik" if d["arah"] == "BUY" else "turun")
+
+
+def f_volume(c5, c15, c1h, c4h, d):
+    buy, c5x, *_, last, a, close = _ctx(c5, c15, c1h, c4h, d)
+    vols = [c["v"] for c in c5x[-21:-1]]
+    return sum(vols) <= 0 or last["v"] >= 1.2 * sum(vols) / len(vols)
+
+
+def f_vwap(c5, c15, c1h, c4h, d):
+    buy, c5x, *_, last, a, close = _ctx(c5, c15, c1h, c4h, d)
+    vw = vwap_harian(c5x)
+    return vw is None or ((close > vw) if buy else (close < vw))
+
+
+def f_ruang(c5, c15, c1h, c4h, d):
+    buy, c5x, c15x, c1hx, c4hx, last, a, close = _ctx(c5, c15, c1h, c4h, d)
+    highs, lows = pivots(c1hx[-120:])
+    jarak = abs(d["tp1"] - d["entry"])
+    if buy:
+        h = [x for x in highs if x > close]
+        return not h or min(h) - close >= jarak
+    l = [x for x in lows if x < close]
+    return not l or close - max(l) >= jarak
+
+
+def f_rsi(c5, c15, c1h, c4h, d):
+    r = d["rsi5m"]
+    return (45 <= r <= 65) if d["arah"] == "BUY" else (35 <= r <= 55)
+
+
+def f_risk_min(c5, c15, c1h, c4h, d, pct=0.3):
+    """SL minimal sekian % dari harga, biar fee nggak makan profit."""
+    return d["risk_poin"] / d["entry"] * 100 >= pct
+
+
+FILTER = {
+    "candle": f_candle, "tidak_jauh": f_tidak_jauh, "volatilitas": f_volatilitas, "adx": f_adx,
+    "4h": f_4h, "volume": f_volume, "vwap": f_vwap, "ruang": f_ruang, "rsi": f_rsi, "risk_min": f_risk_min,
+}
+
+
+def cari_setup_dengan(filters: list):
+    """Bikin fungsi strategi: setup versi lama + daftar filter wajib."""
+    def fn(c5, c15, c1h, c4h, digits):
+        d = cari_setup(c5, c15, c1h, digits)
+        if not d:
+            return None
+        for f in filters:
+            if not FILTER[f](c5, c15, c1h, c4h, d):
+                return None
+        return d
+    return fn

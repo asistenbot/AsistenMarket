@@ -387,7 +387,7 @@ async def cmd_uji(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def job_backtest_awal(context: ContextTypes.DEFAULT_TYPE):
     try:
-        teks, _ = await backtest.uji_semua(30)
+        teks, _ = await backtest.uji_semua(30, strategi=backtest.strategi_eksperimen())
         for baris in teks.split("\n"):
             logger.info("HASIL BACKTEST | %s", baris)
     except Exception as e:
