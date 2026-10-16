@@ -8,6 +8,7 @@ Peran:
   Manajer      → manager.py (rangkum & kirim ke Telegram)
 """
 import logging
+import os
 import time
 from datetime import datetime, time as dtime
 
@@ -423,6 +424,11 @@ async def on_error(update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
+    if os.getenv("BOT_AKTIF", "1") == "0":
+        # Saklar mati: bot nggak polling Telegram, nggak ambil data, nggak kirim apa-apa.
+        logger.warning("BOT_AKTIF=0 → bot sedang dimatikan. Ubah jadi 1 di Railway Variables buat nyalain lagi.")
+        while True:
+            time.sleep(3600)
     if not config.TELEGRAM_BOT_TOKEN:
         raise SystemExit("TELEGRAM_BOT_TOKEN belum diisi")
     app = Application.builder().token(config.TELEGRAM_BOT_TOKEN).build()
